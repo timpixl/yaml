@@ -114,6 +114,8 @@ func (e *encoder) marshal(tag string, in reflect.Value) {
 		e.nilv()
 		return
 	}
+	e.emitter.marLastKind = e.emitter.marCurKind
+	e.emitter.marCurKind = in.Kind()
 	switch in.Kind() {
 	case reflect.Interface:
 		e.marshal(tag, in.Elem())
@@ -126,7 +128,14 @@ func (e *encoder) marshal(tag string, in reflect.Value) {
 			e.marshal(tag, in.Elem())
 		}
 	case reflect.Struct:
-		if in.Type() == timeType {
+		if comment, ok := iface.(Comment); ok {
+			if e.emitter.marLastKind == reflect.Slice || e.emitter.marLastKind == reflect.Map {
+				e.commentv([]byte(comment.Value), true)
+				e.emitter.marCurKind = e.emitter.marLastKind
+			} else {
+				e.commentv([]byte(comment.Value), false)
+			}
+		} else if in.Type() == timeType {
 			e.timev(tag, in)
 		} else {
 			e.structv(tag, in)
@@ -171,8 +180,12 @@ func (e *encoder) itemsv(tag string, in reflect.Value) {
 	e.mappingv(tag, func() {
 		slice := in.Convert(reflect.TypeOf([]MapItem{})).Interface().([]MapItem)
 		for _, item := range slice {
-			e.marshal("", reflect.ValueOf(item.Key))
-			e.marshal("", reflect.ValueOf(item.Value))
+			if comment, ok := item.Key.(Comment); ok {
+				e.marshal("", reflect.ValueOf(comment))
+			} else {
+				e.marshal("", reflect.ValueOf(item.Key))
+				e.marshal("", reflect.ValueOf(item.Value))
+			}
 		}
 	})
 }
@@ -353,6 +366,15 @@ func (e *encoder) floatv(tag string, in reflect.Value) {
 
 func (e *encoder) nilv() {
 	e.emitScalar("null", "", "", yaml_PLAIN_SCALAR_STYLE)
+}
+
+func (e *encoder) commentv(value []byte, indent bool) {
+	e.event = yaml_event_t{
+		typ:           yaml_COMMENT_EVENT,
+		value:         value,
+		commentIndent: indent,
+	}
+	e.emit()
 }
 
 func (e *encoder) emitScalar(value, anchor, tag string, style yaml_scalar_style_t) {

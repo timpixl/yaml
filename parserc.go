@@ -546,6 +546,16 @@ func yaml_parser_parse_node(parser *yaml_parser_t, event *yaml_event_t, block, i
 		}
 		return true
 	}
+	if token.typ == yaml_COMMENT_TOKEN {
+		*event = yaml_event_t{
+			typ:        yaml_COMMENT_EVENT,
+			value:      token.value,
+			start_mark: token.start_mark,
+			end_mark:   token.end_mark,
+		}
+		skip_token(parser)
+		return true
+	}
 	if len(anchor) > 0 || len(tag) > 0 {
 		parser.state = parser.states[len(parser.states)-1]
 		parser.states = parser.states[:len(parser.states)-1]
@@ -579,8 +589,23 @@ func yaml_parser_parse_node(parser *yaml_parser_t, event *yaml_event_t, block, i
 func yaml_parser_parse_block_sequence_entry(parser *yaml_parser_t, event *yaml_event_t, first bool) bool {
 	if first {
 		token := peek_token(parser)
-		parser.marks = append(parser.marks, token.start_mark)
+		oldToken := token
 		skip_token(parser)
+		token = peek_token(parser)
+		if token == nil {
+			return false
+		}
+		if token.typ == yaml_COMMENT_TOKEN {
+			*event = yaml_event_t{
+				typ:        yaml_COMMENT_EVENT,
+				value:      token.value,
+				start_mark: token.start_mark,
+				end_mark:   token.end_mark,
+			}
+			parser.tokens[parser.tokens_head] = *oldToken
+			return true
+		}
+		parser.marks = append(parser.marks, oldToken.start_mark)
 	}
 
 	token := peek_token(parser)
@@ -616,6 +641,15 @@ func yaml_parser_parse_block_sequence_entry(parser *yaml_parser_t, event *yaml_e
 
 		skip_token(parser)
 		return true
+	} else if token.typ == yaml_COMMENT_TOKEN {
+		*event = yaml_event_t{
+			typ:        yaml_COMMENT_EVENT,
+			value:      token.value,
+			start_mark: token.start_mark,
+			end_mark:   token.end_mark,
+		}
+		skip_token(parser)
+		return true
 	}
 
 	context_mark := parser.marks[len(parser.marks)-1]
@@ -632,6 +666,17 @@ func yaml_parser_parse_indentless_sequence_entry(parser *yaml_parser_t, event *y
 	token := peek_token(parser)
 	if token == nil {
 		return false
+	}
+
+	if token.typ == yaml_COMMENT_TOKEN {
+		*event = yaml_event_t{
+			typ:        yaml_COMMENT_EVENT,
+			value:      token.value,
+			start_mark: token.start_mark,
+			end_mark:   token.end_mark,
+		}
+		skip_token(parser)
+		return true
 	}
 
 	if token.typ == yaml_BLOCK_ENTRY_TOKEN {
@@ -711,6 +756,15 @@ func yaml_parser_parse_block_mapping_key(parser *yaml_parser_t, event *yaml_even
 		}
 		skip_token(parser)
 		return true
+	} else if token.typ == yaml_COMMENT_TOKEN {
+		*event = yaml_event_t{
+			typ:        yaml_COMMENT_EVENT,
+			value:      token.value,
+			start_mark: token.start_mark,
+			end_mark:   token.end_mark,
+		}
+		skip_token(parser)
+		return true
 	}
 
 	context_mark := parser.marks[len(parser.marks)-1]
@@ -738,10 +792,24 @@ func yaml_parser_parse_block_mapping_value(parser *yaml_parser_t, event *yaml_ev
 	if token.typ == yaml_VALUE_TOKEN {
 		mark := token.end_mark
 		skip_token(parser)
+		oldToken := token
 		token = peek_token(parser)
 		if token == nil {
 			return false
 		}
+
+		if token.typ == yaml_COMMENT_TOKEN {
+			*event = yaml_event_t{
+				typ:        yaml_COMMENT_EVENT,
+				value:      token.value,
+				start_mark: token.start_mark,
+				end_mark:   token.end_mark,
+			}
+			// Reset the current token to the value token. After this, this function is going to be called again, and we need the first token in the queue to be a VALUE token. A COMMENT token is not a real value, so we essentially "skip" it.
+			parser.tokens[parser.tokens_head] = *oldToken
+			return true
+		}
+
 		if token.typ != yaml_KEY_TOKEN &&
 			token.typ != yaml_VALUE_TOKEN &&
 			token.typ != yaml_BLOCK_END_TOKEN {

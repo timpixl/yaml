@@ -16,6 +16,7 @@ type resolveMapItem struct {
 
 var resolveTable = make([]byte, 256)
 var resolveMap = make(map[string]resolveMapItem)
+var IgnoreResolve = make(map[string]bool)
 
 func init() {
 	t := resolveTable
@@ -117,8 +118,10 @@ func resolve(tag string, in string) (rtag string, out interface{}) {
 	}
 	if hint != 0 && tag != yaml_STR_TAG && tag != yaml_BINARY_TAG {
 		// Handle things we can lookup in a map.
-		if item, ok := resolveMap[in]; ok {
-			return item.tag, item.value
+		if _, ignoreOK := IgnoreResolve[in]; !ignoreOK {
+			if item, ok := resolveMap[in]; ok {
+				return item.tag, item.value
+			}
 		}
 
 		// Base 60 floats are a bad idea, were dropped in YAML 1.2, and
@@ -180,7 +183,7 @@ func resolve(tag string, in string) (rtag string, out interface{}) {
 					return yaml_INT_TAG, uintv
 				}
 			} else if strings.HasPrefix(plain, "-0b") {
-				intv, err := strconv.ParseInt("-" + plain[3:], 2, 64)
+				intv, err := strconv.ParseInt("-"+plain[3:], 2, 64)
 				if err == nil {
 					if true || intv == int64(int(intv)) {
 						return yaml_INT_TAG, int(intv)

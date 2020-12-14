@@ -4,9 +4,38 @@ import (
 	"io"
 )
 
+func yaml_insert_comment_token(parser *yaml_parser_t, pos int) {
+	parser.comment_ok = true
+	for _, comment_token := range parser.comment_tokens {
+		yaml_insert_token(parser, pos, &comment_token)
+	}
+	parser.comment_tokens = []yaml_token_t{}
+	parser.comment_ok = false
+}
+
 func yaml_insert_token(parser *yaml_parser_t, pos int, token *yaml_token_t) {
 	//fmt.Println("yaml_insert_token", "pos:", pos, "typ:", token.typ, "head:", parser.tokens_head, "len:", len(parser.tokens))
-
+	// Insert comment in some specified location.
+	if DefaultCommentsEnable {
+		if token.typ == yaml_STREAM_END_TOKEN {
+			if parser.comment_start {
+				yaml_insert_comment_token(parser, len(parser.tokens)-parser.tokens_head-1)
+			}
+		}
+		if token.typ == yaml_SCALAR_TOKEN {
+			parser.comment_start = true
+		}
+		if token.typ == yaml_BLOCK_ENTRY_TOKEN {
+			yaml_insert_comment_token(parser, -1)
+		}
+		if !parser.comment_ok && token.typ == yaml_COMMENT_TOKEN {
+			if parser.comment_tokens == nil {
+				parser.comment_tokens = []yaml_token_t{}
+			}
+			parser.comment_tokens = append(parser.comment_tokens, *token)
+			return
+		}
+	}
 	// Check if we can move the queue at the beginning of the buffer.
 	if parser.tokens_head > 0 && len(parser.tokens) == cap(parser.tokens) {
 		if parser.tokens_head != len(parser.tokens) {
@@ -16,6 +45,10 @@ func yaml_insert_token(parser *yaml_parser_t, pos int, token *yaml_token_t) {
 		parser.tokens_head = 0
 	}
 	parser.tokens = append(parser.tokens, *token)
+	if DefaultCommentsEnable && pos < 0 &&
+		(token.typ == yaml_VALUE_TOKEN) {
+		yaml_insert_comment_token(parser, -1)
+	}
 	if pos < 0 {
 		return
 	}
