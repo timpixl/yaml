@@ -3,6 +3,7 @@ package yaml
 import (
 	"fmt"
 	"io"
+	"reflect"
 )
 
 // The version directive data.
@@ -139,6 +140,7 @@ const (
 	yaml_ANCHOR_TOKEN // An ANCHOR token.
 	yaml_TAG_TOKEN    // A TAG token.
 	yaml_SCALAR_TOKEN // A SCALAR token.
+	yaml_COMMENT_TOKEN
 )
 
 func (tt yaml_token_type_t) String() string {
@@ -187,6 +189,8 @@ func (tt yaml_token_type_t) String() string {
 		return "yaml_TAG_TOKEN"
 	case yaml_SCALAR_TOKEN:
 		return "yaml_SCALAR_TOKEN"
+	case yaml_COMMENT_TOKEN:
+		return "yaml_COMMENT_TOKEN"
 	}
 	return "<unknown token>"
 }
@@ -219,6 +223,10 @@ type yaml_token_t struct {
 	major, minor int8
 }
 
+func (t *yaml_token_t) String() string {
+	return fmt.Sprintf("Token(typ=%s, value=%s)", t.typ.String(), string(t.value))
+}
+
 // Events
 
 type yaml_event_type_t int8
@@ -238,6 +246,7 @@ const (
 	yaml_SEQUENCE_END_EVENT   // A SEQUENCE-END event.
 	yaml_MAPPING_START_EVENT  // A MAPPING-START event.
 	yaml_MAPPING_END_EVENT    // A MAPPING-END event.
+	yaml_COMMENT_EVENT
 )
 
 var eventStrings = []string{
@@ -297,6 +306,8 @@ type yaml_event_t struct {
 
 	// The style (for yaml_SCALAR_EVENT, yaml_SEQUENCE_START_EVENT, yaml_MAPPING_START_EVENT).
 	style yaml_style_t
+
+	commentIndent bool
 }
 
 func (e *yaml_event_t) scalar_style() yaml_scalar_style_t     { return yaml_scalar_style_t(e.style) }
@@ -593,6 +604,11 @@ type yaml_parser_t struct {
 	aliases []yaml_alias_data_t // The alias data.
 
 	document *yaml_document_t // The currently parsed document.
+
+	// parse comment
+	comment_tokens []yaml_token_t
+	comment_ok     bool
+	comment_start  bool
 }
 
 // Emitter Definitions
@@ -638,6 +654,49 @@ const (
 	yaml_EMIT_BLOCK_MAPPING_VALUE_STATE        // Expect a value of a block mapping.
 	yaml_EMIT_END_STATE                        // Expect nothing.
 )
+
+func (state yaml_emitter_state_t) String() string {
+	switch state {
+	case yaml_EMIT_STREAM_START_STATE:
+		return "yaml_EMIT_STREAM_START_STATE"
+	case yaml_EMIT_FIRST_DOCUMENT_START_STATE:
+		return "yaml_EMIT_FIRST_DOCUMENT_START_STATE"
+	case yaml_EMIT_DOCUMENT_START_STATE:
+		return "yaml_EMIT_DOCUMENT_START_STATE"
+	case yaml_EMIT_DOCUMENT_CONTENT_STATE:
+		return "yaml_EMIT_DOCUMENT_CONTENT_STATE"
+	case yaml_EMIT_DOCUMENT_END_STATE:
+		return "yaml_EMIT_DOCUMENT_END_STATE"
+	case yaml_EMIT_FLOW_SEQUENCE_FIRST_ITEM_STATE:
+		return "yaml_EMIT_FLOW_SEQUENCE_FIRST_ITEM_STATE"
+	case yaml_EMIT_FLOW_SEQUENCE_ITEM_STATE:
+		return "yaml_EMIT_FLOW_SEQUENCE_ITEM_STATE"
+	case yaml_EMIT_FLOW_MAPPING_FIRST_KEY_STATE:
+		return "yaml_EMIT_FLOW_MAPPING_FIRST_KEY_STATE"
+	case yaml_EMIT_FLOW_MAPPING_KEY_STATE:
+		return "yaml_EMIT_FLOW_MAPPING_KEY_STATE"
+	case yaml_EMIT_FLOW_MAPPING_SIMPLE_VALUE_STATE:
+		return "yaml_EMIT_FLOW_MAPPING_SIMPLE_VALUE_STATE"
+	case yaml_EMIT_FLOW_MAPPING_VALUE_STATE:
+		return "yaml_EMIT_FLOW_MAPPING_VALUE_STATE"
+	case yaml_EMIT_BLOCK_SEQUENCE_FIRST_ITEM_STATE:
+		return "yaml_EMIT_BLOCK_SEQUENCE_FIRST_ITEM_STATE"
+	case yaml_EMIT_BLOCK_SEQUENCE_ITEM_STATE:
+		return "yaml_EMIT_BLOCK_SEQUENCE_ITEM_STATE"
+	case yaml_EMIT_BLOCK_MAPPING_FIRST_KEY_STATE:
+		return "yaml_EMIT_BLOCK_MAPPING_FIRST_KEY_STATE"
+	case yaml_EMIT_BLOCK_MAPPING_KEY_STATE:
+		return "yaml_EMIT_BLOCK_MAPPING_KEY_STATE"
+	case yaml_EMIT_BLOCK_MAPPING_SIMPLE_VALUE_STATE:
+		return "yaml_EMIT_BLOCK_MAPPING_SIMPLE_VALUE_STATE"
+	case yaml_EMIT_BLOCK_MAPPING_VALUE_STATE:
+		return "yaml_EMIT_BLOCK_MAPPING_VALUE_STATE"
+	case yaml_EMIT_END_STATE:
+		return "yaml_EMIT_END_STATE"
+	default:
+		return "UNKNOWN_STATE"
+	}
+}
 
 // The emitter structure.
 //
@@ -736,4 +795,7 @@ type yaml_emitter_t struct {
 	last_anchor_id int // The last assigned anchor id.
 
 	document *yaml_document_t // The currently emitted document.
+	// Record the last parsing type, convenience comment to align.
+	marLastKind reflect.Kind
+	marCurKind  reflect.Kind
 }

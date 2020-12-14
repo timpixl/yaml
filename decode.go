@@ -17,6 +17,7 @@ const (
 	sequenceNode
 	scalarNode
 	aliasNode
+	commentNode
 )
 
 type node struct {
@@ -154,6 +155,8 @@ func (p *parser) parse() *node {
 	case yaml_STREAM_END_EVENT:
 		// Happens when attempting to decode an empty buffer.
 		return nil
+	case yaml_COMMENT_EVENT:
+		return p.comment()
 	default:
 		panic("attempted to parse unknown event: " + p.event.typ.String())
 	}
@@ -198,6 +201,13 @@ func (p *parser) scalar() *node {
 	return n
 }
 
+func (p *parser) comment() *node {
+	n := p.node(commentNode)
+	n.value = string(p.event.value)
+	p.expect(yaml_COMMENT_EVENT)
+	return n
+}
+
 func (p *parser) sequence() *node {
 	n := p.node(sequenceNode)
 	p.anchor(n, p.event.anchor)
@@ -214,7 +224,7 @@ func (p *parser) mapping() *node {
 	p.anchor(n, p.event.anchor)
 	p.expect(yaml_MAPPING_START_EVENT)
 	for p.peek() != yaml_MAPPING_END_EVENT {
-		n.children = append(n.children, p.parse(), p.parse())
+		n.children = append(n.children, p.parse())
 	}
 	p.expect(yaml_MAPPING_END_EVENT)
 	return n
@@ -236,16 +246,18 @@ type decoder struct {
 }
 
 var (
-	mapItemType    = reflect.TypeOf(MapItem{})
-	durationType   = reflect.TypeOf(time.Duration(0))
-	defaultMapType = reflect.TypeOf(map[interface{}]interface{}{})
-	ifaceType      = defaultMapType.Elem()
-	timeType       = reflect.TypeOf(time.Time{})
-	ptrTimeType    = reflect.TypeOf(&time.Time{})
+	mapItemType  = reflect.TypeOf(MapItem{})
+	durationType = reflect.TypeOf(time.Duration(0))
+	// DefaultMapType type to unmarshal maps into, use MapSlice for ordered maps.
+	DefaultMapType        = reflect.TypeOf(map[interface{}]interface{}{})
+	DefaultCommentsEnable = false
+	ifaceType             = DefaultMapType.Elem()
+	timeType              = reflect.TypeOf(time.Time{})
+	ptrTimeType           = reflect.TypeOf(&time.Time{})
 )
 
 func newDecoder(strict bool) *decoder {
-	d := &decoder{mapType: defaultMapType, strict: strict}
+	d := &decoder{mapType: DefaultMapType, strict: strict}
 	d.aliases = make(map[*node]bool)
 	return d
 }
@@ -368,6 +380,8 @@ func (d *decoder) unmarshal(n *node, out reflect.Value) (good bool) {
 	switch n.kind {
 	case scalarNode:
 		good = d.scalar(n, out)
+	case commentNode:
+		good = d.comment(n, out)
 	case mappingNode:
 		good = d.mapping(n, out)
 	case sequenceNode:
@@ -406,6 +420,20 @@ func resetMap(out reflect.Value) {
 	for _, k := range out.MapKeys() {
 		out.SetMapIndex(k, zeroValue)
 	}
+}
+
+type Comment struct {
+	Value string
+}
+
+func (d *decoder) comment(n *node, out reflect.Value) (good bool) {
+	switch out.Kind() {
+	case reflect.Interface:
+		out.Set(reflect.ValueOf(Comment{
+			Value: n.value,
+		}))
+	}
+	return true
 }
 
 func (d *decoder) scalar(n *node, out reflect.Value) bool {
@@ -657,27 +685,45 @@ func (d *decoder) mapping(n *node, out reflect.Value) (good bool) {
 	if out.IsNil() {
 		out.Set(reflect.MakeMap(outt))
 	}
-	l := len(n.children)
-	for i := 0; i < l; i += 2 {
-		if isMerge(n.children[i]) {
-			d.merge(n.children[i+1], out)
-			continue
-		}
-		k := reflect.New(kt).Elem()
-		if d.unmarshal(n.children[i], k) {
-			kkind := k.Kind()
-			if kkind == reflect.Interface {
-				kkind = k.Elem().Kind()
-			}
-			if kkind == reflect.Map || kkind == reflect.Slice {
-				failf("invalid map key: %#v", k.Interface())
-			}
-			e := reflect.New(et).Elem()
-			if d.unmarshal(n.children[i+1], e) {
-				d.setMapIndex(n.children[i+1], out, k, e)
+	var key *node
+	var value *node
+	var keySet bool
+	for _, child := range n.children {
+		if child.kind == commentNode {
+			out.SetMapIndex(
+				reflect.ValueOf(Comment{
+					Value: child.value,
+				}),
+				reflect.Zero(kt))
+		} else {
+			if !keySet {
+				keySet = true
+				key = child
+			} else {
+				keySet = false
+				value = child
+				if isMerge(key) {
+					d.merge(value, out)
+					continue
+				}
+				k := reflect.New(kt).Elem()
+				if d.unmarshal(key, k) {
+					kkind := k.Kind()
+					if kkind == reflect.Interface {
+						kkind = k.Elem().Kind()
+					}
+					if kkind == reflect.Map || kkind == reflect.Slice {
+						failf("invalid map key: %#v", k.Interface())
+					}
+					e := reflect.New(et).Elem()
+					if d.unmarshal(value, e) {
+						d.setMapIndex(value, out, k, e)
+					}
+				}
 			}
 		}
 	}
+
 	d.mapType = mapType
 	return true
 }
@@ -701,21 +747,40 @@ func (d *decoder) mappingSlice(n *node, out reflect.Value) (good bool) {
 	d.mapType = outt
 
 	var slice []MapItem
-	var l = len(n.children)
-	for i := 0; i < l; i += 2 {
-		if isMerge(n.children[i]) {
-			d.merge(n.children[i+1], out)
-			continue
-		}
-		item := MapItem{}
-		k := reflect.ValueOf(&item.Key).Elem()
-		if d.unmarshal(n.children[i], k) {
-			v := reflect.ValueOf(&item.Value).Elem()
-			if d.unmarshal(n.children[i+1], v) {
-				slice = append(slice, item)
+	var key *node
+	var value *node
+	var keySet bool
+	for _, child := range n.children {
+		if child.kind == commentNode {
+			slice = append(slice, MapItem{
+				Key: Comment{
+					Value: child.value,
+				},
+				Value: nil,
+			})
+		} else {
+			if !keySet {
+				keySet = true
+				key = child
+			} else {
+				keySet = false
+				value = child
+				if isMerge(key) {
+					d.merge(value, out)
+					continue
+				}
+				item := MapItem{}
+				k := reflect.ValueOf(&item.Key).Elem()
+				if d.unmarshal(key, k) {
+					v := reflect.ValueOf(&item.Value).Elem()
+					if d.unmarshal(value, v) {
+						slice = append(slice, item)
+					}
+				}
 			}
 		}
 	}
+
 	out.Set(reflect.ValueOf(slice))
 	d.mapType = mapType
 	return true
