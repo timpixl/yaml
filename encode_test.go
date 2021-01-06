@@ -11,9 +11,27 @@ import (
 	"net"
 	"os"
 
+	"github.com/Pixl-SG/yaml"
 	. "gopkg.in/check.v1"
-	"gopkg.in/yaml.v2"
 )
+
+type jsonNumberT string
+
+func (j jsonNumberT) Int64() (int64, error) {
+	val, err := strconv.Atoi(string(j))
+	if err != nil {
+		return 0, err
+	}
+	return int64(val), nil
+}
+
+func (j jsonNumberT) Float64() (float64, error) {
+	return strconv.ParseFloat(string(j), 64)
+}
+
+func (j jsonNumberT) String() string {
+	return string(j)
+}
 
 var marshalIntTest = 123
 
@@ -367,6 +385,39 @@ var marshalTests = []struct {
 		map[string]string{"a": "你好 #comment"},
 		"a: '你好 #comment'\n",
 	},
+	{
+		map[string]interface{}{"a": jsonNumberT("5")},
+		"a: 5\n",
+	},
+	{
+		map[string]interface{}{"a": jsonNumberT("100.5")},
+		"a: 100.5\n",
+	},
+	{
+		map[string]interface{}{"a": jsonNumberT("bogus")},
+		"a: bogus\n",
+	},
+}
+
+func (s *S) TestLineWrapping(c *C) {
+	var v = map[string]string{
+		"a": "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 ",
+	}
+	data, err := yaml.Marshal(v)
+	c.Assert(err, IsNil)
+	c.Assert(string(data), Equals,
+		"a: 'abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 abcdefghijklmnopqrstuvwxyz\n"+
+			"  ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 '\n")
+
+	// The API does not allow this process to be reversed as it's intended
+	// for migration only. v3 drops this method and instead offers more
+	// control on a per encoding basis.
+	yaml.FutureLineWrap()
+
+	data, err = yaml.Marshal(v)
+	c.Assert(err, IsNil)
+	c.Assert(string(data), Equals,
+		"a: 'abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 '\n")
 }
 
 func (s *S) TestMarshal(c *C) {
