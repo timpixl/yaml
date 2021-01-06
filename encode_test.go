@@ -11,8 +11,8 @@ import (
 	"net"
 	"os"
 
+	"github.com/Pixl-SG/yaml"
 	. "gopkg.in/check.v1"
-	"gopkg.in/yaml.v2"
 )
 
 type jsonNumberT string
@@ -406,8 +406,8 @@ func (s *S) TestLineWrapping(c *C) {
 	data, err := yaml.Marshal(v)
 	c.Assert(err, IsNil)
 	c.Assert(string(data), Equals,
-		"a: 'abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 abcdefghijklmnopqrstuvwxyz\n" +
-		"  ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 '\n")
+		"a: 'abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 abcdefghijklmnopqrstuvwxyz\n"+
+			"  ABCDEFGHIJKLMNOPQRSTUVWXYZ 1234567890 '\n")
 
 	// The API does not allow this process to be reversed as it's intended
 	// for migration only. v3 drops this method and instead offers more

@@ -665,11 +665,6 @@ func yaml_parser_fetch_next_token(parser *yaml_parser_t) bool {
 		return false
 	}
 
-	// Remove obsolete potential simple keys.
-	if !yaml_parser_stale_simple_keys(parser) {
-		return false
-	}
-
 	// Check the indentation level against the current column, only if the current token is not a comment
 	if parser.buffer[parser.buffer_pos] != '#' {
 		if !yaml_parser_unroll_indent(parser, parser.mark.column) {

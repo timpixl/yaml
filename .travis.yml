@@ -14,4 +14,4 @@ go:
     - "1.14.x"
     - "tip"
 
-go_import_path: gopkg.in/yaml.v2
+go_import_path: github.com/Pixl-SG/yaml 
