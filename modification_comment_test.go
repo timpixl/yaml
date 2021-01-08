@@ -5,9 +5,8 @@ package yaml_test
 import (
 	"bytes"
 	"fmt"
-	"io"
+	"log"
 	"strconv"
-	"strings"
 
 	yaml "github.com/Pixl-SG/yaml"
 	"github.com/pkg/errors"
@@ -15,42 +14,92 @@ import (
 )
 
 var (
+	sourceYaml = `version: 2
+jobs:
+- schedule: 0 0/5 * 1/1 * ? *
+  type: shits
+  config:
+    host: mongodb://localhost:27017/admin?replicaSet=rs
+    minSecondaries: 2
+    minOplogHours: 100
+    maxSecondaryDelay: 120
+# shit here
+- name: B
+  schedule: 0 0/5 * 1/1 * ? *
+  type: mongodb.cluster
+  config:
+    host: mongodb://localhost:27017/admin?replicaSet=rs
+    minSecondaries: 2
+    minOplogHours: 100
+    maxSecondaryDelay: 120`
+
 	sourceYamlWithoutComment = `aa: 0
 bb: string1
-cc : string1
-
+cc: string1
 lists:
-
-#  list1
-  - list1_key1: value1
-    list1_key4:
-      list1_sub1: value4
+- list1_key1: value1
+  list1_key4:
+    list1_sub1: value4
+`
+	sourceYamlWithoutCommentExpected = `aa: 0
+bb: bbstring
+cc: string1
+lists:
+- list1_key1: value1
+  list1_key4:
+    list1_sub1: value4
 `
 	sourceYamlWithCommentEnglish = `aa: 0
+# single value
 bb: string1
-cc : string1
-
+cc: string1
 # Here is list
 lists:
-
-#  list1
-  - list1_key1: value1
-    list1_key4:
-      list1_sub1: value4
+- list1_key1: value1
+  list1_key4:
+    list1_sub1: value4
+`
+	sourceYamlWithCommentEnglishExpected = `aa: 0
+# single value
+bb: bbstring
+cc: string1
+# Here is list
+lists:
+- list1_key1: value1
+  list1_key4:
+    list1_sub1: value4
 `
 	sourceYamlWithCommentChinese = `aa: 0
+# 单个值
 bb: string1
-cc : string1
-
+cc: string1
 # 这里是列表
 lists:
+- list1_key1: value1
+  list1_key4:
+    list1_sub2: value5
+`
 
-#  列表1
-  - list1_key1: value1
-    list1_key4:
-      list1_sub2: value5
+	sourceYamlWithCommentChineseExpected = `aa: 0
+# 单个值
+bb: bbstring
+cc: string1
+# 这里是列表
+lists:
+- list1_key1: value1
+  list1_key4:
+    list1_sub2: value5
 `
 )
+
+var enableLog = false
+
+func mylog(format string, values ...interface{}) {
+	if !enableLog {
+		return
+	}
+	fmt.Printf(format, values...)
+}
 
 func parsePath(path string) []string {
 	return parsePathAccum([]string{}, path)
@@ -140,7 +189,7 @@ func getArray(context interface{}) (array []interface{}, ok bool) {
 }
 
 func writeMap(context interface{}, paths []string, value interface{}) yaml.MapSlice {
-	fmt.Printf("writeMap for %v for %v with value %v\n", paths, context, value)
+	mylog("writeMap for %v for %v with value %v\n", paths, context, value)
 
 	mapSlice := getMapSlice(context)
 
@@ -153,14 +202,14 @@ func writeMap(context interface{}, paths []string, value interface{}) yaml.MapSl
 		newChild := yaml.MapItem{Key: paths[0]}
 		mapSlice = append(mapSlice, newChild)
 		child = entryInSlice(mapSlice, paths[0])
-		fmt.Printf("\tAppended child at %v for mapSlice %v\n", paths[0], mapSlice)
+		mylog("\tAppended child at %v for mapSlice %v\n", paths[0], mapSlice)
 	}
 
-	fmt.Printf("\tchild.Value %v\n", child.Value)
+	mylog("\tchild.Value %v\n", child.Value)
 
 	remainingPaths := paths[1:]
 	child.Value = updatedChildValue(child.Value, remainingPaths, value)
-	fmt.Printf("\tReturning mapSlice %v\n", mapSlice)
+	mylog("\tReturning mapSlice %v\n", mapSlice)
 	return mapSlice
 }
 
@@ -180,14 +229,14 @@ func updatedChildValue(child interface{}, remainingPaths []string, value interfa
 }
 
 func writeArray(context interface{}, paths []string, value interface{}) []interface{} {
-	fmt.Printf("writeArray for %v for %v with value %v\n", paths, context, value)
+	mylog("writeArray for %v for %v with value %v\n", paths, context, value)
 	array, _ := getArray(context)
 
 	if len(paths) == 0 {
 		return array
 	}
 
-	fmt.Printf("\tarray %v\n", array)
+	mylog("\tarray %v\n", array)
 
 	rawIndex := paths[0]
 	var index int64
@@ -203,11 +252,11 @@ func writeArray(context interface{}, paths []string, value interface{}) []interf
 	}
 	currentChild := array[index]
 
-	fmt.Printf("\tcurrentChild %v\n", currentChild)
+	mylog("\tcurrentChild %v\n", currentChild)
 
 	remainingPaths := paths[1:]
 	array[index] = updatedChildValue(currentChild, remainingPaths, value)
-	fmt.Printf("\tReturning array %v\n", array)
+	mylog("\tReturning array %v\n", array)
 	return array
 }
 
@@ -302,13 +351,11 @@ func calculateValue(value interface{}, tail []string) (interface{}, error) {
 	return value, nil
 }
 
-/// end data-navigator
-
 var docIndex = "0"
 
 type updateDataFn func(dataBucket interface{}, currentIndex int) (interface{}, error)
 
-func modifyKeyValue(source string, key string, value string) error {
+func modifyKeyValue(source string, key string, value string) (str string, err error) {
 
 	var updateData = func(dataBucket interface{}, currentIndex int) (interface{}, error) {
 		docIndexInt, err := strconv.Atoi(docIndex)
@@ -316,82 +363,70 @@ func modifyKeyValue(source string, key string, value string) error {
 			return nil, err
 		}
 		if currentIndex == docIndexInt {
-			fmt.Printf("Updating index %v\n", currentIndex)
-			fmt.Printf("setting %v to %v\n", key, value)
+			mylog("Updating index %v\n", currentIndex)
+			mylog("setting %v to %v\n", key, value)
 			var paths = parsePath(key)
 			dataBucket = updatedChildValue(dataBucket, paths, value)
 		}
+
 		return dataBucket, nil
+	}
+	decoded := yaml.MapSlice{}
+	err = yaml.Unmarshal([]byte(source), &decoded)
+	if err != nil {
+		log.Fatalf("error: %v", err)
 	}
 
 	buf := new(bytes.Buffer)
 	encoder := yaml.NewEncoder(buf)
-	yamlDecoder := mapYamlDecoder(updateData, encoder)
-	stream := strings.NewReader(source)
-	err := yamlDecoder(yaml.NewDecoder(stream))
-	if nil != err {
-		return err
+	update(updateData, encoder, decoded)
+
+	return buf.String(), nil
+}
+
+type yamlDecoderFn func(*yaml.Decoder) error
+
+func update(updateData updateDataFn, encoder *yaml.Encoder, decoded yaml.MapSlice) error {
+	var dataBucket interface{}
+	var errorWriting error
+	var errorUpdating error
+	var currentIndex = 0
+
+	dataBucket = decoded
+
+	dataBucket, errorUpdating = updateData(dataBucket, currentIndex)
+	if errorUpdating != nil {
+		return errors.Wrapf(errorUpdating, "Error updating document at index %v", currentIndex)
+	}
+
+	errorWriting = encoder.Encode(dataBucket)
+
+	if errorWriting != nil {
+		return errors.Wrapf(errorWriting, "Error writing document at index %v, %v", currentIndex, errorWriting)
 	}
 
 	return nil
 }
 
-type yamlDecoderFn func(*yaml.Decoder) error
-
-func mapYamlDecoder(updateData updateDataFn, encoder *yaml.Encoder) yamlDecoderFn {
-	return func(decoder *yaml.Decoder) error {
-		var dataBucket interface{}
-		var errorReading error
-		var errorWriting error
-		var errorUpdating error
-		var currentIndex = 0
-
-		docIndexInt, err := strconv.Atoi(docIndex)
-		if err != nil {
-			return err
-		}
-
-		for {
-			fmt.Printf("Read index %v\n", currentIndex)
-			errorReading = decoder.Decode(&dataBucket)
-
-			if errorReading == io.EOF {
-				if currentIndex <= docIndexInt {
-					return fmt.Errorf("Asked to process document index %v but there are only %v document(s)", docIndex, currentIndex)
-				}
-				return nil
-			} else if errorReading != nil {
-				return errors.Wrapf(errorReading, "Error reading document at index %v, %v", currentIndex, errorReading)
-			}
-			dataBucket, errorUpdating = updateData(dataBucket, currentIndex)
-			if errorUpdating != nil {
-				return errors.Wrapf(errorUpdating, "Error updating document at index %v", currentIndex)
-			}
-
-			errorWriting = encoder.Encode(dataBucket)
-
-			if errorWriting != nil {
-				return errors.Wrapf(errorWriting, "Error writing document at index %v, %v", currentIndex, errorWriting)
-			}
-			currentIndex = currentIndex + 1
-		}
-	}
-}
-
-// Modify without comment
 func (s *S) TestModifyWithoutComment(c *C) {
-	modifyKeyValue(sourceYamlWithoutComment, "bb", "bbstring")
-	//c.Assert(err, IsNil)
+	//res, err := modifyKeyValue(sourceYaml, "jobs[0].type", "dfff")
+	res, err := modifyKeyValue(sourceYamlWithoutComment, "bb", "bbstring")
+	c.Assert(err, IsNil)
+	c.Assert(string(res), Equals, string(sourceYamlWithoutCommentExpected))
 }
 
 // Modification with comment in ascii, like English
 func (s *S) TestModifyWithCommentEnglish(c *C) {
-	modifyKeyValue(sourceYamlWithCommentEnglish, "bb", "bbstring")
-	//c.Assert(err, IsNil)
+	yaml.DefaultCommentsEnable = true
+	res, err := modifyKeyValue(sourceYamlWithCommentEnglish, "bb", "bbstring")
+	c.Assert(err, IsNil)
+	c.Assert(string(res), Equals, string(sourceYamlWithCommentEnglishExpected))
 }
 
 // Modification with comment in utf-8, like Chinese
 func (s *S) TestModifyWithCommentChinese(c *C) {
-	modifyKeyValue(sourceYamlWithCommentChinese, "bb", "bbstring")
-	//c.Assert(err, IsNil)
+	yaml.DefaultCommentsEnable = true
+	res, err := modifyKeyValue(sourceYamlWithCommentChinese, "bb", "bbstring")
+	c.Assert(err, IsNil)
+	c.Assert(string(res), Equals, string(sourceYamlWithCommentChineseExpected))
 }
