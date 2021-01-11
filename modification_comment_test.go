@@ -408,8 +408,8 @@ func update(updateData updateDataFn, encoder *yaml.Encoder, decoded yaml.MapSlic
 	return nil
 }
 
+// Modificaiton without comment
 func (s *S) TestModifyWithoutComment(c *C) {
-	//res, err := modifyKeyValue(sourceYaml, "jobs[0].type", "dfff")
 	res, err := modifyKeyValue(sourceYamlWithoutComment, "bb", "bbstring")
 	c.Assert(err, IsNil)
 	c.Assert(string(res), Equals, string(sourceYamlWithoutCommentExpected))
